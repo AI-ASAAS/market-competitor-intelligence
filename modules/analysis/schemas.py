@@ -101,20 +101,18 @@ class SWOTAnalysis(BaseModel):
 
 
 class GapItem(BaseModel):
-    category: Literal["خدمية", "تسويقية", "سعرية / نموذج عمل", "تقنية وتجربة مستخدم"] = Field(
-        ..., description="نوع الفجوة"
-    )
+    category: str = Field(..., description="نوع الفجوة (خدمية، تسويقية، سعرية، تقنية)")
     title: str = Field(..., description="عنوان الفجوة")
     description: str = Field(..., description="شرح الفجوة وكيف يستغلها المنافسون")
-    impact_level: Literal["عالي", "متوسط", "منخفض"] = Field("عالي", description="مستوى التأثير")
+    impact_level: str = Field("عالي", description="مستوى التأثير (عالي، متوسط، منخفض)")
     action_to_close: str = Field(..., description="الإجراء العملي لسد هذه الفجوة")
 
 
 class RecommendationItem(BaseModel):
-    priority: Literal["عاجل", "مهم", "تحسين استراتيجي"] = Field(..., description="مستوى الأولوية")
+    priority: str = Field("مهم", description="مستوى الأولوية (عاجل، مهم، تحسين استراتيجي)")
     title: str = Field(..., description="عنوان التوصية")
     impact: str = Field(..., description="الأثر المتوقع على الحصة السوقية أو الإيرادات")
-    effort: Literal["منخفض", "متوسط", "عالي"] = Field("متوسط", description="الجهد والموارد المطلوبة")
+    effort: str = Field("متوسط", description="الجهد والموارد المطلوبة (منخفض، متوسط، عالي)")
     action_steps: List[str] = Field(default_factory=list, description="خطوات التنفيذ العملية")
 
 

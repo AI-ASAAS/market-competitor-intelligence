@@ -65,6 +65,7 @@ class StrategicAnalystAgent:
     ) -> CompetitiveReport:
         system_prompt = """أنت "كبير مستشاري الاستراتيجية والتنافسية" في فريق ASAAS.
 مهمتك: قراءة ملف الشركة وملفات الـ 3 منافسين، وتوليد تقرير استراتيجي تحليلي فائق الاحترافية بصيغة JSON فقط.
+قاعدة تقنية حاسمة: لا تستخدم علامات تنصيص مزدوجة " داخل قيم النصوص إطلاقاً (استخدم الأقواس « » أو التنصيص الفردي ' بدلاً منها) حتى لا يتعطل كود JSON.
 
 يجب أن يحتوي الـ JSON على:
 {
@@ -122,24 +123,28 @@ class StrategicAnalystAgent:
 قم بصياغة التحليل التنافسي وجدول المقارنة الكامل الآن بصيغة JSON."""
 
         response_text = await self.llm.generate(prompt=prompt, system_prompt=system_prompt)
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
-            report_id = str(uuid.uuid4())
-            now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        from tools.json_helper import safe_load_json
+        
+        try:
+            data = safe_load_json(response_text)
+            if isinstance(data, dict):
+                report_id = str(uuid.uuid4())
+                now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            return CompetitiveReport(
-                id=report_id,
-                created_at=now_iso,
-                executive_summary=data.get("executive_summary", "ملخص تنفيذي للموقف التنافسي."),
-                overall_score=float(data.get("overall_score", 8.2)),
-                target_analysis=target,
-                competitors=competitors,
-                comparison_table=ComparisonTable(**data.get("comparison_table", {"dimensions": []})),
-                swot=SWOTAnalysis(**data.get("swot", {"strengths": [], "weaknesses": [], "opportunities": [], "threats": []})),
-                gap_analysis=[GapItem(**g) for g in data.get("gap_analysis", [])],
-                recommendations=[RecommendationItem(**r) for r in data.get("recommendations", [])]
-            )
+                return CompetitiveReport(
+                    id=report_id,
+                    created_at=now_iso,
+                    executive_summary=data.get("executive_summary", f"تحليل تنافسي متكامل لـ {target.company_name}."),
+                    overall_score=float(data.get("overall_score", 8.2)),
+                    target_analysis=target,
+                    competitors=competitors,
+                    comparison_table=ComparisonTable(**data.get("comparison_table", {"dimensions": []})),
+                    swot=SWOTAnalysis(**data.get("swot", {"strengths": [], "weaknesses": [], "opportunities": [], "threats": []})),
+                    gap_analysis=[GapItem(**g) for g in data.get("gap_analysis", [])],
+                    recommendations=[RecommendationItem(**r) for r in data.get("recommendations", [])]
+                )
+        except Exception as e:
+            logger.warning("Error parsing strategic analyst JSON: %s", e)
 
         raise ValueError("فشل في استخراج JSON للتحليل التنافسي")
 

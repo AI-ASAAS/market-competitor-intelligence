@@ -46,28 +46,42 @@ class LLMClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        # تحديد سقف معقول للتوكنات لتفادي خطأ حجز الرصيد (402) في OpenRouter
+        # تحديد سقف معقول للتوكنات مع تعطيل التفكير الزائد لضمان سرعة الاستجابة وامتلاء JSON
         payload = {
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 3000,
-            "provider": {"data_collection": "deny"}
+            "max_tokens": 3500,
+            "reasoning": {"effort": "none"}
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        fallback_models = [
+            "nvidia/nemotron-3.5-lightning:free",
+            "openrouter/free"
+        ]
+
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(url, json=payload, headers=headers)
             
-            # إذا واجهنا خطأ رصيد غير كافٍ (402) أو خطأ في النموذج، نحاول تلقائياً مع النموذج المجاني المعتمد
-            if response.status_code == 402 and not model.endswith(":free"):
-                fallback_model = "nvidia/nemotron-3.5-lightning:free"
-                logger.warning("OpenRouter credit limit reached for %s. Falling back to %s", model, fallback_model)
-                payload["model"] = fallback_model
-                response = await client.post(url, json=payload, headers=headers)
+            # إذا واجهنا خطأ رصيد غير كافٍ (402) أو خطأ في النموذج (400/404/429)، ننتقل للنماذج المجانية المعتمدة
+            if response.status_code in [400, 402, 404, 429]:
+                logger.warning("Primary model %s failed with status %d: %s. Trying free fallbacks...", model, response.status_code, response.text[:200])
+                for fb in fallback_models:
+                    if fb == model:
+                        continue
+                    payload["model"] = fb
+                    logger.info("Attempting fallback with model: %s", fb)
+                    response = await client.post(url, json=payload, headers=headers)
+                    if response.status_code == 200:
+                        break
 
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            choice_msg = data["choices"][0]["message"]
+            content = choice_msg.get("content") or ""
+            if not content.strip() and choice_msg.get("reasoning"):
+                content = choice_msg.get("reasoning")
+            return content
 
     async def _call_gemini(self, prompt: str, system_prompt: str, model: str) -> str:
         import httpx

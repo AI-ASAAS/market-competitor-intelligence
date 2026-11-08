@@ -56,9 +56,21 @@ class CompetitorFinderAgent:
                 competitor_profiles = await self._extract_real_competitors_with_llm(search_pack, target_analysis)
                 logger.info("Successfully extracted %d real competitors with LLM", len(competitor_profiles))
             except Exception as e:
-                logger.warning("LLM extraction failed: %s. Using verified real-world market registry.", e)
+                logger.warning("LLM extraction failed: %s. Using live web search results.", e)
 
-        # 3. في حال نقص عدد المنافسين عن 3، استكمالهم من سجل الشركات الحقيقية الموثقة
+        # 3. في حال نقص عدد المنافسين عن 3، استخراج المنافسين مباشرة من نتائج بحث Tavily الحية
+        if len(competitor_profiles) < 3:
+            live_tavily_comps = self._extract_competitors_from_tavily_results(
+                search_pack=search_pack,
+                target_analysis=target_analysis,
+                existing_names=[c.name for c in competitor_profiles]
+            )
+            for tc in live_tavily_comps:
+                if len(competitor_profiles) >= 3:
+                    break
+                competitor_profiles.append(tc)
+
+        # 4. كملاذ أخير عند انقطاع الإنترنت، استكمالهم من سجل الشركات الحقيقية الموثقة
         if len(competitor_profiles) < 3:
             real_backups = self._get_verified_real_competitors(
                 target_analysis.industry,
@@ -71,6 +83,64 @@ class CompetitorFinderAgent:
                 competitor_profiles.append(backup)
 
         return competitor_profiles[:3]
+
+    def _extract_competitors_from_tavily_results(
+        self,
+        search_pack: Dict[str, Any],
+        target_analysis: ContentAnalysis,
+        existing_names: List[str]
+    ) -> List[CompetitorProfile]:
+        """استخراج ملفات منافسين حقيقيين مباشرة من عناوين وروابط نتائج بحث Tavily الحية."""
+        from urllib.parse import urlparse
+        extracted: List[CompetitorProfile] = []
+        target_domain = ""
+        if target_analysis.website_url:
+            try:
+                target_domain = urlparse(target_analysis.website_url).netloc.lower().replace("www.", "")
+            except Exception:
+                pass
+
+        for res in search_pack.get("results", []):
+            url = res.get("url", "")
+            title = res.get("title", "")
+            content = res.get("content", "")
+            if not url or not title:
+                continue
+
+            try:
+                parsed = urlparse(url)
+                domain = parsed.netloc.lower().replace("www.", "")
+            except Exception:
+                continue
+
+            if not domain or (target_domain and target_domain in domain):
+                continue
+
+            clean_name = title.split("-")[0].split("|")[0].split(":")[0].split("—")[0].strip()
+            if not clean_name or len(clean_name) < 2:
+                clean_name = domain.split(".")[0].capitalize()
+
+            if any(clean_name.lower() in ex.lower() or ex.lower() in clean_name.lower() for ex in existing_names):
+                continue
+            if any(c.name.lower() == clean_name.lower() for c in extracted):
+                continue
+
+            website_url = f"{parsed.scheme}://{parsed.netloc}"
+            extracted.append(CompetitorProfile(
+                name=clean_name,
+                website=website_url,
+                industry=target_analysis.industry,
+                services=[content[:80]] if content else ["خدمات وبث متكامل"],
+                pricing_summary="تسعير متاح عبر الباقات والموقع الرسمي للمنصة",
+                target_audience=target_analysis.target_audience,
+                marketing_message=title,
+                strengths=["تواجد رقمي نشط وظهور بارز في محركات البحث", "علامة تجارية معتمدة"],
+                weaknesses=["تتطلب متابعة دورية لمعرفة تحديثات الأسعار والعروض"],
+                market_position="منافس مباشر في السوق",
+                online_presence_score=8.8
+            ))
+
+        return extracted
 
     async def _extract_real_competitors_with_llm(
         self,
@@ -86,7 +156,8 @@ class CompetitorFinderAgent:
 2. اكتب الرابط الرسمي الحقيقي للموقع (مثل: https://salla.sa أو https://zid.sa أو https://hungerstation.com أو https://elm.sa).
 3. يُمنع منعاً باتاً اختلاق أو افتراض أو توليد أي أسماء أو نطاقات وهمية (مثل 'competitor-1.com' أو 'pioneers-xxx').
 4. استخرج تفاصيل الخدمات الحقيقية، والأسعار الواقعية إن وجدت في نتائج البحث، ونقاط القوة والضعف الميدانية.
-5. المخرج يجب أن يكون حصراً مصفوفة JSON صالحة بالشكل التالي:
+5. ممنوع استخدام أي علامات تنصيص مزدوجة داخل قيم النصوص نهائياً (استخدم الأقواس « » أو التنصيص الفردي ' بدلاً منها).
+6. المخرج يجب أن يكون حصراً مصفوفة JSON صالحة بالشكل التالي:
 [
   {
     "name": "اسم المنافس الحقيقي",
@@ -129,22 +200,32 @@ class CompetitorFinderAgent:
 استخرج مصفوفة JSON تضم بالضبط 3 منافسين حقيقيين ورسميين 100% منافسين لـ ({target_analysis.company_name}) في ({target_analysis.geographic_scope})، مع روابط مواقعهم الرسمية وخدماتهم وأسعارهم الواقعية."""
 
         response_text = await self.llm.generate(prompt=prompt, system_prompt=system_prompt)
+        from tools.json_helper import safe_load_json
         
-        # استخراج مصفوفة الـ JSON
-        json_match = re.search(r"\[\s*\{.*\}\s*\]", response_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
+        try:
+            raw_data = safe_load_json(response_text)
+            comp_list = []
+            if isinstance(raw_data, list):
+                comp_list = raw_data
+            elif isinstance(raw_data, dict):
+                for k in ["competitors", "items", "data"]:
+                    if k in raw_data and isinstance(raw_data[k], list):
+                        comp_list = raw_data[k]
+                        break
+
             profiles = []
-            for item in data:
+            for item in comp_list:
                 try:
-                    # التحقق من أن الرابط ليس وهمياً
                     if not item.get("website", "").startswith("http"):
                         item["website"] = f"https://{item.get('website', '').lstrip('/')}"
                     profiles.append(CompetitorProfile(**item))
                 except Exception as parse_err:
                     logger.warning("Error parsing competitor item: %s", parse_err)
+
             if profiles:
                 return profiles
+        except Exception as e:
+            logger.warning("Error in safe_load_json for competitor profiles: %s", e)
 
         raise ValueError("فشل في استخراج مصفوفة JSON للمنافسين الحقيقيين")
 

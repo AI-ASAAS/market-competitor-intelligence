@@ -105,14 +105,16 @@ class ContentAnalyzerAgent:
 استخرج الـ JSON الآن بدقة متناهية."""
 
         response_text = await self.llm.generate(prompt=prompt, system_prompt=system_prompt)
+        from tools.json_helper import safe_load_json
         
-        # استخراج كتلة JSON
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
-            if website_url and not data.get("website_url"):
-                data["website_url"] = website_url
-            return ContentAnalysis(**data)
+        try:
+            data = safe_load_json(response_text)
+            if isinstance(data, dict):
+                if website_url and not data.get("website_url"):
+                    data["website_url"] = website_url
+                return ContentAnalysis(**data)
+        except Exception as e:
+            logger.warning("Error parsing LLM JSON in ContentAnalyzer: %s", e)
         
         raise ValueError("فشل استخراج JSON من استجابة النموذج اللغوي")
 
@@ -141,9 +143,13 @@ class ContentAnalyzerAgent:
 
         # 2. استنتاج قطاع الأعمال (Industry)
         industry = "خدمات وتقنية الأعمال الرقمية"
-        lower_text = raw_text.lower()
-        if any(w in lower_text for w in ["متجر", "سلة", "شراء", "منتجات", "ecommerce", "تسوق"]):
+        lower_text = (raw_text + " " + " ".join(headings)).lower()
+        if any(w in lower_text for w in ["sport", "رياضة", "كرة", "دوري", "مباريات", "live", "بث", "streaming", "football", "league"]):
+            industry = "البث والإعلام الرياضي والترفيهي (Sports Media & Streaming)"
+        elif any(w in lower_text for w in ["متجر", "سلة", "شراء", "منتجات", "ecommerce", "تسوق"]):
             industry = "تجارة إلكترونية وحلول التجزئة"
+        elif any(w in lower_text for w in ["توصيل", "مطاعم", "شحن", "لوجست", "delivery", "food"]):
+            industry = "الخدمات اللوجستية وتوصيل الطلبات (Logistics & Delivery)"
         elif any(w in lower_text for w in ["ذكاء اصطناعي", "أتمتة", "بوت", "ai", "وكيل", "agent"]):
             industry = "حلول الذكاء الاصطناعي وأتمتة العمليات (AI & Automation)"
         elif any(w in lower_text for w in ["سحابية", "cloud", "saas", "منصة", "نظام"]):
@@ -152,6 +158,8 @@ class ContentAnalyzerAgent:
             industry = "التسويق الرقمي وتنمية الأعمال (Digital Marketing & Growth)"
         elif any(w in lower_text for w in ["تعليم", "دورات", "تدريب", "أكاديمية", "academy", "learning"]):
             industry = "التعليم والتدريب الرقمي (EdTech & Training)"
+        elif any(w in lower_text for w in ["مالية", "محاسبة", "مدفوعات", "fintech", "تمويل", "بنوك"]):
+            industry = "التقنية المالية والمصرفية (FinTech & Banking)"
         elif any(w in lower_text for w in ["مالية", "محاسبة", "مدفوعات", "fintech", "تمويل"]):
             industry = "التقنية المالية والمحاسبية (FinTech & Accounting)"
 
