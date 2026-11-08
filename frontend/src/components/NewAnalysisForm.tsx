@@ -152,7 +152,7 @@ export const NewAnalysisForm: React.FC<NewAnalysisFormProps> = ({
               onClick={() => setMode('url')}
               disabled={loading}
             >
-              <Icon name="search" className="btn-icon-svg" />
+              <Icon name="search" width={16} height={16} className="btn-icon-svg" />
               <span>تحليل عبر رابط الموقع (URL)</span>
             </button>
             <button
@@ -161,7 +161,7 @@ export const NewAnalysisForm: React.FC<NewAnalysisFormProps> = ({
               onClick={() => setMode('text')}
               disabled={loading}
             >
-              <Icon name="edit" className="btn-icon-svg" />
+              <Icon name="edit" width={16} height={16} className="btn-icon-svg" />
               <span>تحليل عبر لصق نصوص المحتوى</span>
             </button>
           </div>

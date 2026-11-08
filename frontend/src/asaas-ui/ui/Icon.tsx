@@ -197,16 +197,19 @@ const paths = {
 
 export type IconName = keyof typeof paths;
 
-export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {
+export function Icon({ name, width = 16, height = 16, className = '', ...props }: { name: IconName; width?: number | string; height?: number | string } & SVGProps<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"
+      width={width}
+      height={height}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.75}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      className={className}
       {...props}
     >
       {paths[name]}
